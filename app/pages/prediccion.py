@@ -1,8 +1,14 @@
+# pages/prediccion.py
+# Misma lógica de modelado que ya tenías; SOLO cambia la entrada de datos:
+# en vez de leer "criptos_final.csv", trae el último año (1h) desde la API de Binance
+# y convierte UTC -> hora local AR. El resto del flujo queda igual.
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import altair as alt
+import requests
+import time
 from sklearn.linear_model import Ridge, Lasso
 from sklearn.metrics import r2_score
 from sklearn.model_selection import TimeSeriesSplit
@@ -14,38 +20,88 @@ st.write(
     "siguiendo los mismos métodos y variables del notebook."
 )
 
-# --- Dataset ya preprocesado (no se reprocesa el EDA aquí) ---
-DF_PATH = "criptos_final.csv"
-df = pd.read_csv(DF_PATH)
+# ---------------------- Entrada de datos (API Binance, último año 1h) ----------------------
+@st.cache_data(show_spinner=True, ttl=300)
+def fetch_binance_klines_last_year(symbol: str) -> pd.DataFrame:
+    base_url = "https://api.binance.com/api/v3/klines"
+    interval = "1h"
 
-# Columna temporal utilizable
-if "open_time_local" in df.columns:
-    df["open_time_local"] = pd.to_datetime(df["open_time_local"])
-    time_col = "open_time_local"
-elif "open_time_utc" in df.columns:
-    df["open_time_utc"] = pd.to_datetime(df["open_time_utc"], utc=True)
-    time_col = "open_time_utc"
-else:
-    st.error("No se encontró columna temporal en el dataset.")
-    st.stop()
+    now_ar = pd.Timestamp.now(tz="America/Argentina/Buenos_Aires")
+    end_utc = now_ar.tz_convert("UTC")
+    start_utc = (now_ar - pd.Timedelta(days=365)).tz_convert("UTC")
 
-# --- Controles ---
-symbols = sorted(df["symbol"].unique())
+    start_ms = int(start_utc.timestamp() * 1000)
+    end_ms   = int(end_utc.timestamp() * 1000)
+
+    all_rows, cur = [], start_ms
+    while cur < end_ms:
+        params = {
+            "symbol": symbol,
+            "interval": interval,
+            "limit": 1000,
+            "startTime": cur,
+            "endTime": end_ms
+        }
+        resp = requests.get(base_url, params=params, timeout=30)
+        resp.raise_for_status()
+        batch = resp.json()
+        if not batch:
+            break
+        all_rows.extend(batch)
+        last_close = batch[-1][6]   # close_time ms
+        cur = last_close + 1
+        if len(batch) < 1000:
+            break
+        time.sleep(0.15)
+
+    if not all_rows:
+        return pd.DataFrame()
+
+    cols_raw = [
+        "open_time_ms","open","high","low","close","volume",
+        "close_time_ms","quote_volume","trades","taker_base","taker_quote","ignore"
+    ]
+    df = pd.DataFrame(all_rows, columns=cols_raw)
+
+    # Tipos
+    for c in ["open","high","low","close","volume","quote_volume","taker_base","taker_quote"]:
+        df[c] = df[c].astype(float)
+    df["trades"] = df["trades"].astype(int)
+
+    # Tiempos: UTC -> local AR
+    df["open_time_utc"]  = pd.to_datetime(df["open_time_ms"], unit="ms", utc=True)
+    df["close_time_utc"] = pd.to_datetime(df["close_time_ms"], unit="ms", utc=True)
+    df["open_time_local"]  = df["open_time_utc"].dt.tz_convert("America/Argentina/Buenos_Aires")
+    df["close_time_local"] = df["close_time_utc"].dt.tz_convert("America/Argentina/Buenos_Aires")
+
+    df = df.sort_values("open_time_local").reset_index(drop=True)
+    return df[["open_time_local","open_time_utc","open","high","low","close","volume","close_time_local","close_time_utc","quote_volume","trades","taker_base","taker_quote"]]
+
+# ---------------------- Controles ----------------------
+symbols = ["BTCUSDT","ETHUSDT","SOLUSDT"]
 c1, c2 = st.columns(2)
 with c1:
     symbol = st.selectbox("Moneda", symbols, index=0)
 with c2:
     horas = st.selectbox("Horizonte (horas)", [1, 4, 24, 48], index=0)
 
-# --- Serie por símbolo y resample en horas (último close del bloque) ---
-df_sym = (
-    df[df["symbol"] == symbol]
-    .sort_values(time_col)
-    .set_index(time_col)
-)
+# Traer datos de la API para el símbolo elegido
+with st.spinner("Descargando último año (1h) desde Binance..."):
+    df_api = fetch_binance_klines_last_year(symbol)
+
+if df_api.empty:
+    st.error("La API no devolvió datos para el último año.")
+    st.stop()
+
+# ---------------------- A partir de acá, el MISMO flujo que ya tenías ----------------------
+
+# Usamos open_time_local como índice temporal
+time_col = "open_time_local"
+df_sym = df_api.sort_values(time_col).set_index(time_col)
 if not isinstance(df_sym.index, pd.DatetimeIndex):
     df_sym.index = pd.to_datetime(df_sym.index)
 
+# Resample al horizonte elegido
 rule = f"{int(horas)}H"
 serie = df_sym["close"].resample(rule).last().dropna()
 
@@ -68,13 +124,10 @@ if int(horas) == 48:
     feat["ret_12"] = feat["close"].pct_change(12)
     feat["ret_24"] = feat["close"].pct_change(24)
     feat["ret_48"] = feat["close"].pct_change(48)
-
     feat["ma_24"]  = feat["close"].rolling(24, min_periods=12).mean()
     feat["ma_48"]  = feat["close"].rolling(48, min_periods=24).mean()
     feat["ma_d_24_48"] = feat["ma_24"] - feat["ma_48"]
-
     feat["vol_24"] = feat["ret_1"].rolling(24, min_periods=12).std()
-
     feat["min_48"] = feat["close"].rolling(48, min_periods=24).min()
     feat["max_48"] = feat["close"].rolling(48, min_periods=24).max()
 
@@ -84,20 +137,15 @@ feat["close_next"] = feat["close"].shift(-1)
 # Selección de columnas de entrada
 base_cols = ["ret_1","ret_3","ret_6","ma_5","ma_10","ma_diff","vol_10"]
 extra_48  = ["ret_12","ret_24","ret_48","ma_24","ma_48","ma_d_24_48","vol_24","min_48","max_48"]
-if int(horas) == 48:
-    cols = base_cols + [c for c in extra_48 if c in feat.columns]
-else:
-    cols = base_cols
+cols = base_cols + ([c for c in extra_48 if c in feat.columns] if int(horas) == 48 else [])
 
 # --- Preparación de X, y según horizonte ---
 if int(horas) == 48:
-    # Mejorar 48h: predecir log-retorno y reconstruir a precio
     feat["y_ret"] = np.log(feat["close_next"] / feat["close"])
     X_all = feat[cols].dropna()
     y_all = feat.loc[X_all.index, "y_ret"].dropna()
     X_all = X_all.loc[y_all.index]
 else:
-    # Otros horizontes: nivel directo
     X_all = feat[cols].dropna()
     y_all = feat.loc[X_all.index, "close_next"].dropna()
     X_all = X_all.loc[y_all.index]
@@ -113,11 +161,10 @@ def pick_alpha(model_class, alphas, X, y, splits=3):
     for a in alphas:
         r2s = []
         for tr_idx, te_idx in tscv.split(X):
-            m = model_class(alpha=a)
+            m = model_class(alpha=a) if model_class is Ridge else model_class(alpha=a, max_iter=10000)
             m.fit(X.iloc[tr_idx], y.iloc[tr_idx])
             yhat = m.predict(X.iloc[te_idx])
             if int(horas) == 48:
-                # Reconstruir a precio para evaluar R² sobre nivel (consistente con notebook)
                 close_now = feat.loc[X.iloc[te_idx].index, "close"]
                 y_true_price = feat.loc[X.iloc[te_idx].index, "close_next"]
                 y_pred_price = close_now * np.exp(yhat)
@@ -209,8 +256,6 @@ st.altair_chart((line_hist + rule_last + point_pred).properties(
 ), use_container_width=True)
 
 # --- Gráfico 2: Real vs. Predicción en el holdout temporal ---
-# Para cada índice de prueba, la etiqueta real es el cierre del siguiente bloque.
-# Construimos la serie temporal del "siguiente bloque" para graficar correctamente.
 ts_next = pd.Series(X_test.index + pd.Timedelta(hours=int(horas)), index=X_test.index)
 
 df_eval = pd.DataFrame({
