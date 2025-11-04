@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 
-st.title("📊 Exploración de datos")
+st.title(":material/finance: Exploración de datos")
 st.write("Explorá la evolución histórica de precios por criptomoneda y acotá el rango temporal que quieras analizar.")
 
 # --- Usar el CSV ya preprocesado por tu EDA (sin reprocesar acá) ---
@@ -61,7 +61,7 @@ df_rango = df_symbol[
     (df_symbol["open_time_local"].dt.date <= end_date)
 ].copy()
 
-st.subheader(f"📈 Análisis de {symbol} entre {start_date} y {end_date}")
+st.subheader(f":material/moving: Análisis de {symbol} entre {start_date} y {end_date}")
 
 if df_rango.empty:
     st.warning("No hay datos en el rango seleccionado.")

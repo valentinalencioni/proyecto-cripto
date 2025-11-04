@@ -1,6 +1,6 @@
 import streamlit as st
 
-st.set_page_config(page_title="CriptoPredictor", page_icon="💰", layout="wide")
+st.set_page_config(page_title="CriptoPredictor", page_icon=":material/money_bag:", layout="wide")
 
 # --- Definir las páginas usando rutas RELATIVAS ---
 home = st.Page(

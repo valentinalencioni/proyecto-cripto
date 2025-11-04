@@ -7,7 +7,7 @@ from sklearn.linear_model import Ridge, Lasso
 from sklearn.metrics import r2_score
 from sklearn.model_selection import TimeSeriesSplit
 
-st.title("🔮 Predicción del próximo cierre")
+st.title(":material/price_check: Predicción del próximo cierre")
 st.write(
     "Elegí la **moneda** y el **horizonte (en horas)**. "
     "Mostramos el **próximo precio de cierre estimado** y la **precisión (R²)** del modelo, "

@@ -1,6 +1,7 @@
 import streamlit as st
 
-st.title("💰 CriptoPredictor")
+st.title(":material/home: **Inicio de la Aplicación**")
+
 st.subheader("Convertí los datos en decisiones inteligentes")
 
 st.write(
@@ -15,8 +16,8 @@ st.write(
 
     ---
     Elegí una opción en el menú lateral para comenzar tu recorrido:
-    - 📊 **Exploración de datos:** descubrí las tendencias históricas.
-    - 🔮 **Predicción de valor:** ingresá tus propios datos y anticipá el próximo movimiento.
+    - :material/analytics: **Exploración de datos:** descubrí las tendencias históricas.
+    - :material/data_exploration: **Predicción de valor:** ingresá tus propios datos y anticipá el próximo movimiento.
     """
 )
 
