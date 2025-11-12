@@ -18,14 +18,18 @@ exploracion = st.Page(
 prediccion = st.Page(
     "pages/prediccion.py",
     title="Predicción de valor",
-    icon=":material/psychology:"
+    icon=":material/trending_up:"
+)
+
+metricas = st.Page(
+    "pages/metricas.py",
+    title="Métricas relevantes",
+    icon=":material/leaderboard:"
 )
 
 # --- Registrar la navegación ---
-pg = st.navigation(
-    {
-        "App": [home, exploracion, prediccion]
-    }
-)
+pg = st.navigation({
+    "App": [home, exploracion, prediccion, metricas]
+})
 
 pg.run()
